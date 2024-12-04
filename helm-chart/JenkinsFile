@@ -1,0 +1,104 @@
+pipeline {
+    agent any
+
+    environment {
+        // Define environment variables for Docker image tags and Git repositories
+        FRONTEND_REPO = 'https://github.com/UnpredictablePrashant/learnerReportCS_frontend.git'
+        BACKEND_REPO = 'https://github.com/UnpredictablePrashant/learnerReportCS_backend.git'
+        ECR_REGISTRY = '975050024946.dkr.ecr.us-west-2.amazonaws.com'
+        FRONTEND_IMAGE = 'assignment_cont_frontend'
+        BACKEND_IMAGE = 'assignment_cont_backend'
+        AWS_REGION = 'us-west-2'
+        AWS_CREDENTIALS_ID = 'aws-credentials'          // If using AWS ECR
+    }
+
+    stages {
+        stage('Clone Repositories') {
+            steps {
+                script {
+                    // Clone frontend and backend repositories
+                    echo "Cloning frontend repository"
+                    git url: "${FRONTEND_REPO}", branch: 'main'
+
+                    echo "Cloning backend repository"
+                    git url: "${BACKEND_REPO}", branch: 'main'
+                }
+            }
+        }
+
+        stage('Build Docker Images') {
+            steps {
+                script {
+                    // Build Docker images for frontend and backend
+                    echo "Building frontend Docker image"
+                    dir('learnerReportCS_frontend') {
+                        sh 'docker build -t ${ECR_REGISTRY}/${FRONTEND_IMAGE}:latest .'
+                    }
+
+                    echo "Building backend Docker image"
+                    dir('learnerReportCS_backend') {
+                        sh 'docker build -t ${ECR_REGISTRY}/${BACKEND_IMAGE}:latest .'
+                    }
+                }
+            }
+        }
+
+        stage('Push Docker Images to ECR') {
+            steps {
+                script {
+                    // Login to AWS ECR
+                    withCredentials([usernamePassword(credentialsId: AWS_CREDENTIALS_ID, passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
+                        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                    }
+
+                    // Push frontend Docker image to ECR
+                    echo "Pushing frontend Docker image to ECR"
+                    sh 'docker push ${ECR_REGISTRY}/${FRONTEND_IMAGE}:latest'
+
+                    // Push backend Docker image to ECR
+                    echo "Pushing backend Docker image to ECR"
+                    sh 'docker push ${ECR_REGISTRY}/${BACKEND_IMAGE}:latest'
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    // Deploy using Helm
+                    echo "Deploying frontend and backend to Kubernetes using Helm"
+                    
+                    withCredentials([usernamePassword(credentialsId: AWS_CREDENTIALS_ID, passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
+                        // Set up AWS CLI configuration to allow kubectl access to the cluster
+                        sh '''
+                            aws eks --region ${AWS_REGION} update-kubeconfig --name <your-cluster-name>
+                        '''
+                    }
+
+                    // Deploy frontend using Helm
+                    sh 'helm upgrade --install frontend ./helm-chart/frontend --set image.repository=${ECR_REGISTRY}/${FRONTEND_IMAGE} --set image.tag=latest'
+
+                    // Deploy backend using Helm
+                    sh 'helm upgrade --install backend ./helm-chart/backend --set image.repository=${ECR_REGISTRY}/${BACKEND_IMAGE} --set image.tag=latest'
+                }
+            }
+        }
+
+        stage('Clean Up') {
+            steps {
+                script {
+                    // Clean up Docker images to free space after pushing
+                    echo "Cleaning up Docker images"
+                    sh 'docker rmi ${ECR_REGISTRY}/${FRONTEND_IMAGE}:latest ${ECR_REGISTRY}/${BACKEND_IMAGE}:latest'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning workspace...'
+            cleanWs() // Clean up the workspace after the build is done
+        }
+    }
+}

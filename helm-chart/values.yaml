@@ -1,0 +1,12 @@
+frontend:
+  image: 975050024946.dkr.ecr.us-west-2.amazonaws.com/assignment_cont_frontend:latest
+  replicaCount: 2
+
+backend:
+  image: 975050024946.dkr.ecr.us-west-2.amazonaws.com/assignment_cont_backend:latest
+  replicaCount: 2
+  mongoUri: "mongodb://mongo:27017/your_database_name"
+
+mongo:
+  replicaCount: 1
+  image: mongo:latest
